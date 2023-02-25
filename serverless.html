@@ -1,0 +1,388 @@
+<html lang="en-US">
+
+<head>
+    <meta charset="UTF-8" />
+    <title>Canvas experiment</title>
+    <script type="application/javascript">
+        var mapSize = 20;
+        const spacing = 1.5;
+        var cellSize = null;
+        var world = [];
+        var player_pos = { x: 5.5, y: 5.5 };
+        var player_dir = { x: 1, y: 0 }
+        var responseSinceLastMessage = false;
+        var messagesToSend = [];
+        var threedee = false;
+        var lightMode = false;
+
+        document.addEventListener("DOMContentLoaded", () => {
+            // generate the world
+            for (let i = 0; i < mapSize; i++) {
+                world.push(Array(mapSize).fill(0, 0, mapSize));
+            }
+            for (let x = 0; x < mapSize; x++) {
+                for (let y = 0; y < mapSize; y++) {
+                    if (x == 0 || y == 0 || x == mapSize-1 || y == mapSize-1) {
+                        world[x][y] = 1;
+                    }
+                }   
+            }
+            const canvas = document.querySelector('canvas');
+
+            cellSize = (Math.min(canvas.width, canvas.height) / mapSize) - spacing;
+                        
+            let selecting = false;
+            let cell_on_mouse_down = null;
+
+            document.addEventListener('keydown', function(event) {
+                if (event.key == "g") {
+                    threedee = !threedee;
+                }
+                if (event.key == "a") {
+                    player_dir = rotateVec(player_dir, -4);
+                }
+                if (event.key == "d") {
+                    player_dir = rotateVec(player_dir, 4);
+                }
+                if (event.key == "l") {
+                    lightMode = !lightMode;
+                }
+                if (event.key == "w") {
+                    player_pos.x += player_dir.x / 5.0;
+                    player_pos.y += player_dir.y / 5.0;
+                }
+                if (event.key == "s") {
+                    player_pos.x -= player_dir.x / 5.0;
+                    player_pos.y -= player_dir.y / 5.0;
+                }
+            });
+            canvas.addEventListener('mousedown', function(e) {
+                if (e.button == 2) {
+                    player_pos = screenSpaceToWorldSpace({ x: e.clientX, y: e.clientY })
+                    return;
+                }
+                let hitTest = pickCellAtCoordsInCanvas(e.clientX, e.clientY, canvas);
+                if (hitTest.hit) {
+                    cell_on_mouse_down = hitTest.cell;
+                    changeCellState(hitTest.cell);
+                    selecting = true;
+                } else {
+                    selecting = false;
+                    cell_on_mouse_down = null;
+                }
+            });
+            canvas.addEventListener('mouseup', function(e) {
+                selecting = false;
+            });
+            canvas.addEventListener('mousemove', function(e) {
+                if (e.buttons == 2) {
+                    player_pos = screenSpaceToWorldSpace({ x: e.clientX, y: e.clientY })
+                    console.log("moving!");
+                    return;
+                }
+                if (!selecting) return;
+                let hitTest = pickCellAtCoordsInCanvas(e.clientX, e.clientY, canvas);
+                if (!hitTest.hit) return;
+                if (pointsEqual(hitTest.cell, cell_on_mouse_down)) return;
+                if (hitTest.cell.value != cell_on_mouse_down.value) return;
+                changeCellState(hitTest.cell);
+            });
+            var intervalId = window.setInterval(function() {
+                draw(canvas);
+            }, (1 / 30.0)) * 1000.0;
+        });
+        function changeCellState(c) {
+            if (world[c.x][c.y] == 0) {
+                world[c.x][c.y] = 1;
+            } else {
+                world[c.x][c.y] = 0;
+            }
+        }
+
+        function pointsEqual(a, b) {
+            if (a === b) return true;
+            return a.x === b.x && a.y === b.y; 
+        }
+
+        function pickCellAtCoordsInCanvas(x, y, canvas) {
+            // render to an element selection canvas
+            var selectCanvas = document.createElement('canvas');
+            selectCanvas.width = canvas.width;
+            selectCanvas.height = canvas.height;
+            draw(selectCanvas, true)
+
+            const ctx = selectCanvas.getContext("2d");
+            
+            const rect = canvas.getBoundingClientRect()
+
+            const screenX = (x - rect.left);
+            const screenY = (y - rect.top);
+
+            var pixel = ctx.getImageData(screenX, screenY, 1, 1).data;
+            const worldX = pixel[0];
+            const worldY = pixel[1];
+            const missCheck = pixel[2];
+            if (missCheck != 1) {
+                return { hit: false };
+            }
+            if (worldX >= mapSize || worldY >= mapSize) {
+                return { hit: false }
+            }
+            return { hit: true, cell: { x: worldX, y: worldY, value: world[worldX][worldY] }};
+        }
+        function worldSpaceToScreenSpace(point) {
+            return { 
+                x: point.x * cellSize + (spacing * (point.x - 0.5)),
+                y: point.y * cellSize + (spacing * (point.y - 0.5))
+            }
+        }
+        // Doing the reverse calculation iteratively, because I thought it would be fun to write.
+        function screenSpaceToWorldSpace(point) {
+            let pLower = { x: Number.MAX_SAFE_INTEGER, y: Number.MAX_SAFE_INTEGER };
+            let pUpper = { x: -Number.MAX_SAFE_INTEGER, y: -Number.MAX_SAFE_INTEGER };
+            let iteration = 0;
+            let tolerance = 0.000001;
+            let maxIterations = 100;
+            let error = Number.MAX_VALUE;
+            let middle;
+            while (error > tolerance && iteration < maxIterations) {
+                middle = { x: (pUpper.x + pLower.x) / 2.0, y: (pUpper.y + pLower.y) / 2.0 }
+                const transformedPoint = worldSpaceToScreenSpace(middle);
+                if (transformedPoint.x < point.x) {
+                    pUpper.x = middle.x;
+                } else {
+                    pLower.x = middle.x;
+                }
+                if (transformedPoint.y < point.y) {
+                    pUpper.y = middle.y;
+                } else {
+                    pLower.y = middle.y;
+                }
+                error = Math.sqrt(((transformedPoint.x - point.x) ** 2) + ((transformedPoint.y - point.y) ** 2));
+                iteration++;
+            }
+            return middle;
+        }
+        function canvas_arrow(context, fromx, fromy, tox, toy) {
+            var headlen = 15; // length of head in pixels
+            var dx = tox - fromx;
+            var dy = toy - fromy;
+            var angle = Math.atan2(dy, dx);
+            context.moveTo(fromx, fromy);
+            context.lineTo(tox, toy);
+            context.lineTo(tox - headlen * Math.cos(angle - Math.PI / 6), toy - headlen * Math.sin(angle - Math.PI / 6));
+            context.moveTo(tox, toy);
+            context.lineTo(tox - headlen * Math.cos(angle + Math.PI / 6), toy - headlen * Math.sin(angle + Math.PI / 6));
+        }
+        function castRay(dir) {
+            let posX = player_pos.x;
+            let posY = player_pos.y;
+
+            let rayDirX = dir.x;
+            let rayDirY = dir.y;
+
+            let mapX = Math.floor(posX);
+            let mapY = Math.floor(posY);
+
+            //length of ray from current position to next x or y-side
+            let sideDistX;
+            let sideDistY;
+
+            //length of ray from one x or y-side to next x or y-side
+            let deltaDistX = (rayDirX == 0) ? 1e30 : Math.abs(1 / rayDirX);
+            let deltaDistY = (rayDirY == 0) ? 1e30 : Math.abs(1 / rayDirY);
+            let perpWallDist;
+
+            //what direction to step in x or y-direction (either +1 or -1)
+            let stepX;
+            let stepY;
+
+            let hit = 0; //was there a wall hit?
+            let side; //was a NS or a EW wall hit?
+
+            if (rayDirX < 0)
+            {
+                stepX = -1;
+                sideDistX = (posX - mapX) * deltaDistX;
+            }
+            else
+            {
+                stepX = 1;
+                sideDistX = (mapX + 1.0 - posX) * deltaDistX;
+            }
+            if (rayDirY < 0)
+            {
+                stepY = -1;
+                sideDistY = (posY - mapY) * deltaDistY;
+            }
+            else
+            {
+                stepY = 1;
+                sideDistY = (mapY + 1.0 - posY) * deltaDistY;
+            }
+        
+            while (hit == 0)
+            {
+                //jump to next map square, either in x-direction, or in y-direction
+                if (sideDistX < sideDistY)
+                {
+                    sideDistX += deltaDistX;
+                    mapX += stepX;
+                    side = 0;
+                }
+                else
+                {
+                    sideDistY += deltaDistY;
+                    mapY += stepY;
+                    side = 1;
+                }
+                if (mapX < 0 || mapY < 0 || mapX >= mapSize || mapY >= mapSize) {
+                    break;
+                }
+                //Check if ray has hit a wall
+                if (world[mapX][mapY] > 0) {
+                    hit = 1;
+                }
+            }
+            if (hit != 1) return null;
+
+            if (side == 0) {
+                perpWallDist = (sideDistX - deltaDistX);
+            } else {
+                perpWallDist = (sideDistY - deltaDistY);
+            }         
+            return { side: side, length: perpWallDist, x: rayDirX * perpWallDist, y: rayDirY * perpWallDist };
+        }
+        function rotateVec(vec, angle) {
+            let theta = angle * 0.017453;
+            let cs = Math.cos(theta);
+            let sn = Math.sin(theta);
+            let x = vec.x * cs - vec.y * sn;
+            let y = vec.x * sn + vec.y * cs;
+            return { x, y }
+        }
+        function draw3d(canvas) {
+            const ctx = canvas.getContext("2d");
+            ctx.fillStyle = "rgb(0, 0, 0)";
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            ctx.save();
+            let pos = worldSpaceToScreenSpace(player_pos);
+            ctx.translate(0, canvas.height / 2.0);
+            let planeX = 0;
+            let planeY = 0.66;
+            for (let x = 0; x < canvas.width; x++) {
+                let angle = ((((x / canvas.width) * 2) - 1) * 45);
+                let rayDir = rotateVec(player_dir, angle);
+                let ray = castRay({x: rayDir.x, y:rayDir.y});
+                if (ray == null) continue;
+                let screenSpaceRay = worldSpaceToScreenSpace(ray);
+                let lineHeight = canvas.height / (ray.length * Math.cos(angle * 0.017453));
+                ctx.lineWidth = 1;
+                let brightness = 255 - ray.side * 80;
+                ctx.strokeStyle = `rgb(0, ${brightness}, ${brightness})`;
+                ctx.beginPath();
+                ctx.moveTo(x, -lineHeight);
+                ctx.lineTo(x, lineHeight);
+                ctx.stroke(); 
+            }
+            ctx.restore();
+        }
+        function draw(canvas, drawCoordColors = false) {
+            if (threedee) {
+                draw3d(canvas);
+                return;
+            }
+            const ctx = canvas.getContext("2d");
+
+            const centerX = canvas.width / 2;
+            const centerY = canvas.height / 2;
+
+            ctx.fillStyle = "rgb(100, 100, 100)";
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            ctx.save();
+            ctx.strokeRect(0, 0, canvas.width, canvas.height);
+
+            // let dimensionDiff = canvas.width - canvas.height;
+            // if (dimensionDiff > 0) {
+            //     ctx.translate(dimensionDiff / 2.0, 0.0);
+            // } else {
+            //     ctx.translate(0.0, -dimensionDiff / 2.0);
+            // }
+
+
+            if (drawCoordColors) {
+                ctx.imageSmoothingEnabled = false;
+                ctx.fillStyle = "rgb(0, 0, 0)";
+                ctx.fillRect(0, 0, canvas.width, canvas.height)
+            } else {
+                ctx.imageSmoothingEnabled = true;
+            }
+            
+            for (let x = 0; x < world.length; x++) {
+                for (let y = 0; y < world.length; y++) {
+                    let cell = world[x][y];
+                    if (!drawCoordColors) {
+                        switch (cell) {
+                            case 0:
+                                ctx.fillStyle = "rgb(0, 0, 0)";
+                                break;
+                            case 1:
+                                ctx.fillStyle = "rgb(0, 128, 128)";
+                                break;
+                        }
+                    } else {
+                        ctx.fillStyle = `rgb(${x}, ${y}, 1)`;
+                    }
+                    ctx.fillRect(x * (cellSize + spacing), y * (cellSize + spacing), cellSize, cellSize);
+                }
+            }
+
+            if (drawCoordColors) return;
+
+            const pos = worldSpaceToScreenSpace(player_pos);
+            ctx.translate(pos.x, pos.y);
+
+            let minAngle = -45;
+            let maxAngle = 45;
+            let angleInc = 1;
+            if (lightMode) {
+                minAngle = 0;
+                maxAngle = 360;
+                angleInc = 0.5;
+            }
+            for (let a = minAngle; a < maxAngle; a += angleInc) {
+                let theta = a * 0.017453;
+                cs = Math.cos(theta);
+                sn = Math.sin(theta);
+                let x = player_dir.x * cs - player_dir.y * sn;
+                let y = player_dir.x * sn + player_dir.y * cs;
+                let ray = castRay({x, y});
+                if (ray === null) continue;
+                ray = worldSpaceToScreenSpace(ray);
+                ctx.lineWidth = 1;
+                ctx.strokeStyle = 'rgb(255, 255, 255)';
+                ctx.beginPath();
+                ctx.moveTo(0, 0);
+                ctx.lineTo(ray.x, ray.y);
+                ctx.stroke(); 
+            }
+
+            ctx.beginPath();
+            ctx.arc(0, 0, 10, 0, 2 * Math.PI, false);
+            ctx.fillStyle = 'green';
+            ctx.fill();
+            ctx.lineWidth = 2;
+            ctx.strokeStyle = '#003300';
+            ctx.stroke();
+            ctx.closePath();
+
+            ctx.restore();
+        }
+    </script>
+</head>
+
+<body oncontextmenu="return false;">
+    <canvas tabindex='1' id="canvas" width="1280" height="720"></canvas>
+</body>
+
+</html>
