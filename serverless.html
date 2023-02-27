@@ -174,9 +174,9 @@
             context.moveTo(tox, toy);
             context.lineTo(tox - headlen * Math.cos(angle + Math.PI / 6), toy - headlen * Math.sin(angle + Math.PI / 6));
         }
-        function castRay(dir) {
-            let posX = player_pos.x;
-            let posY = player_pos.y;
+        function castRay(pos, dir) {
+            let posX = pos.x;
+            let posY = pos.y;
 
             let rayDirX = dir.x;
             let rayDirY = dir.y;
@@ -273,7 +273,7 @@
             for (let x = 0; x < canvas.width; x++) {
                 let angle = ((((x / canvas.width) * 2) - 1) * 45);
                 let rayDir = rotateVec(player_dir, angle);
-                let ray = castRay({x: rayDir.x, y:rayDir.y});
+                let ray = castRay(player_pos, {x: rayDir.x, y:rayDir.y});
                 if (ray == null) continue;
                 let screenSpaceRay = worldSpaceToScreenSpace(ray);
                 let lineHeight = canvas.height / (ray.length * Math.cos(angle * 0.017453));
@@ -283,7 +283,17 @@
                 ctx.beginPath();
                 ctx.moveTo(x, -lineHeight);
                 ctx.lineTo(x, lineHeight);
-                ctx.stroke(); 
+                ctx.stroke();
+                ctx.strokeStyle = `rgb(0, 50, 50)`;
+                ctx.beginPath();
+                ctx.moveTo(x, lineHeight);
+                ctx.lineTo(x, canvas.height);
+                ctx.stroke();
+                ctx.strokeStyle = `rgb(128, 128, 255)`;
+                ctx.beginPath();
+                ctx.moveTo(x, -canvas.height);
+                ctx.lineTo(x, -lineHeight);
+                ctx.stroke();
             }
             ctx.restore();
         }
@@ -356,15 +366,50 @@
                 sn = Math.sin(theta);
                 let x = player_dir.x * cs - player_dir.y * sn;
                 let y = player_dir.x * sn + player_dir.y * cs;
-                let ray = castRay({x, y});
+                let ray = castRay(player_pos, {x, y});
                 if (ray === null) continue;
-                ray = worldSpaceToScreenSpace(ray);
+                let screenSpaceRay = worldSpaceToScreenSpace(ray);
                 ctx.lineWidth = 1;
-                ctx.strokeStyle = 'rgb(255, 255, 255)';
+                ctx.strokeStyle = 'rgb(255, 255, 255, 0.5)';
                 ctx.beginPath();
                 ctx.moveTo(0, 0);
-                ctx.lineTo(ray.x, ray.y);
-                ctx.stroke(); 
+                ctx.lineTo(screenSpaceRay.x, screenSpaceRay.y);
+                ctx.stroke();
+                
+                // ctx.save();
+                
+                // let mag = Math.sqrt(ray.x ** 2 + ray.y ** 2);
+                // ctx.translate(screenSpaceRay.x, screenSpaceRay.y);
+                // let newRay = null;
+                // if (ray.side == 0) {
+                //     newRay = castRay({
+                //         x: player_pos.x + ray.x,
+                //         y: player_pos.y + ray.y
+                //     },
+                //     {
+                //         x: -ray.x / mag,
+                //         y: ray.y / mag
+                //     })
+                // } else {
+                //     newRay = castRay({
+                //         x: player_pos.x + ray.x,
+                //         y: player_pos.y + ray.y
+                //     },
+                //     {
+                //         x: ray.x / mag,
+                //         y: -ray.y / mag
+                //     })
+                // }
+                // screenSpaceRay = worldSpaceToScreenSpace(newRay);
+                // ctx.lineWidth = 1;
+                // ctx.strokeStyle = 'rgb(255, 0, 0, 0.5)';
+                // ctx.beginPath();
+                // ctx.moveTo(0, 0);
+                // ctx.lineTo(screenSpaceRay.x, screenSpaceRay.y);
+                // ctx.stroke();
+               
+                // ctx.restore();
+
             }
 
             ctx.beginPath();

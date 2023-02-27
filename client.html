@@ -5,13 +5,27 @@
     <title>Canvas experiment</title>
     <script type="application/javascript">
         var mapSize = null;
-        const spacing = 2.0;
+        const spacing = 1.0;
         var cellSize = null;
         var host = 'ws://localhost:8090/websockets.php';
         var world = null;
         var ws = null;
         var responseSinceLastMessage = false;
         var messagesToSend = [];
+        function sendMessage(message) {
+            if (message !== null) {
+                // make sure the same message isn't already in the queue
+                if (messagesToSend.some(m => JSON.stringify(m) === JSON.stringify(message))) {
+                    return;
+                }
+                messagesToSend.push(message);
+            }
+            if (responseSinceLastMessage) {
+                responseSinceLastMessage = false;
+                ws.send(JSON.stringify(messagesToSend));
+                messagesToSend = [];
+            }
+        }
         function connect() {
             console.log("Connecting");
 
@@ -22,7 +36,6 @@
                 const replaced = e.data.replace(/\\"/gm, `"`);
                 const substringed = replaced.substring(1, replaced.length - 1);
                 world = JSON.parse(substringed);
-                console.log(world);
                 mapSize = world.map.length;
                 const canvas = document.querySelector('canvas');
                 draw(canvas);
@@ -46,13 +59,56 @@
         document.addEventListener("DOMContentLoaded", () => {
             connect();
 
+
+            document.getElementById('FOV').oninput = function() {
+                sendMessage({
+                    changeFOV: parseInt(this.value, 10)
+                })
+            };
+
             const canvas = document.querySelector('canvas');
-            
+            const canvas3d = document.getElementById('canvas3d');
+
+            console.log('Sending screen data');
+            console.log(canvas3d);
+            sendMessage({
+                screenSize: {
+                    width: canvas3d.width,
+                    height: canvas3d.height
+                }
+            });
+
             let selecting = false;
             let cell_on_mouse_down = null;
 
-            canvas.addEventListener('mousedown', function(e) {
-                if (e.button != 0) {
+            document.addEventListener('keydown', function (event) {
+                if (event.key == "a") {
+                    sendMessage({
+                        rotatePlayer: -7.0
+                    });
+                }
+                if (event.key == "d") {
+                    sendMessage({
+                        rotatePlayer: 7.0
+                    });
+                }
+                if (event.key == "w") {
+                    sendMessage({
+                        movePlayerBy: 0.25
+                    });
+                }
+                if (event.key == "s") {
+                    sendMessage({
+                        movePlayerBy: -0.25
+                    });
+                }
+            });
+            document.addEventListener('mousedown', function (e) {
+                if (e.button == 2) {
+                    let pos = screenSpaceToWorldSpace({ x: e.clientX, y: e.clientY })
+                    sendMessage({
+                        movePlayerTo: pos
+                    })
                     return;
                 }
                 let hitTest = pickCellAtCoordsInCanvas(e.clientX, e.clientY, canvas);
@@ -65,63 +121,42 @@
                     cell_on_mouse_down = null;
                 }
             });
-            canvas.addEventListener('mouseup', function(e) {
-                if (e.button == 2 && !selecting) {
-                    const rect = canvas.getBoundingClientRect()
-               
-                    const clickX = (e.clientX - rect.left);
-                    const clickY = (e.clientY - rect.top);
-                    const playerCoords = worldSpaceToScreenSpace(world.player.pos);
-                    // console.log(`Player: ${playerCoords.x}, ${playerCoords.y}`)
-                    // console.log(`Click: ${clickX}, ${clickY}`)
-                    let connectingLineX = clickX - playerCoords.x;
-                    let connectingLineY = clickY - playerCoords.y;
-                    const mag = Math.sqrt(Math.pow(connectingLineX, 2) + Math.pow(connectingLineY, 2));
-                    let dirX = connectingLineX / mag;
-                    let dirY = connectingLineY / mag;
-                    console.log(`${dirX}, ${dirY}`);
-                } else {
-                    selecting = false;
-                    let hitTest = pickCellAtCoordsInCanvas(e.clientX, e.clientY, canvas);
-                    if (!hitTest.hit) return;
-                }
+            document.addEventListener('mouseup', function (e) {
+                selecting = false;
             });
-            canvas.addEventListener('mousemove', function(e) {
+            document.addEventListener('mousemove', function (e) {
+                if (e.buttons == 2) {
+                    let pos = screenSpaceToWorldSpace({ x: e.clientX, y: e.clientY })
+                    sendMessage({
+                        movePlayerTo: pos
+                    })
+                    return;
+                }
                 if (!selecting) return;
                 let hitTest = pickCellAtCoordsInCanvas(e.clientX, e.clientY, canvas);
                 if (!hitTest.hit) return;
-                if (cellsEqual(hitTest.cell, cell_on_mouse_down)) return;
+                if (pointsEqual(hitTest.cell, cell_on_mouse_down)) return;
                 if (hitTest.cell.value != cell_on_mouse_down.value) return;
                 changeCellState(hitTest.cell);
             });
         });
-        function changeDirection(newDir) {
-            //ws.send(JSON.stringify([newDir]));
-        }
         function changeCellState(c) {
             if (world.map[c.x][c.y] == 0) {
                 world.map[c.x][c.y] = 1;
             } else {
                 world.map[c.x][c.y] = 0;
             }
-            if (!messagesToSend.some(m => cellsEqual({ x: m.cellClicked.x, y: m.cellClicked.y }, c))) {
-                messagesToSend.push({
-                        cellClicked: {
-                            x: c.x,
-                            y: c.y,
-                        }
-                    });
-            }
-            if (responseSinceLastMessage) {
-                responseSinceLastMessage = false;
-                ws.send(JSON.stringify(messagesToSend));
-                messagesToSend = [];
-            }
+            sendMessage({
+                cellClicked: {
+                    x: c.x,
+                    y: c.y,
+                }
+            });
         }
 
-        function cellsEqual(a, b) {
+        function pointsEqual(a, b) {
             if (a === b) return true;
-            return a.x === b.x && a.y === b.y; 
+            return a.x === b.x && a.y === b.y;
         }
 
         function pickCellAtCoordsInCanvas(x, y, canvas) {
@@ -132,7 +167,7 @@
             draw(selectCanvas, true)
 
             const ctx = selectCanvas.getContext("2d");
-            
+
             const rect = canvas.getBoundingClientRect()
 
             const screenX = (x - rect.left);
@@ -148,13 +183,40 @@
             if (worldX >= mapSize || worldY >= mapSize) {
                 return { hit: false }
             }
-            return { hit: true, cell: { x: worldX, y: worldY, value: world.map[worldX][worldY] }};
+            return { hit: true, cell: { x: worldX, y: worldY, value: world.map[worldX][worldY] } };
         }
         function worldSpaceToScreenSpace(coords) {
-            return { 
+            return {
                 x: coords.x * cellSize + (spacing * (coords.x - 0.5)),
                 y: coords.y * cellSize + (spacing * (coords.y - 0.5))
             }
+        }
+        // Doing the reverse calculation iteratively, because I thought it would be fun to write.
+        function screenSpaceToWorldSpace(point) {
+            let pLower = { x: Number.MAX_SAFE_INTEGER, y: Number.MAX_SAFE_INTEGER };
+            let pUpper = { x: -Number.MAX_SAFE_INTEGER, y: -Number.MAX_SAFE_INTEGER };
+            let iteration = 0;
+            let tolerance = 0.000001;
+            let maxIterations = 100;
+            let error = Number.MAX_VALUE;
+            let middle;
+            while (error > tolerance && iteration < maxIterations) {
+                middle = { x: (pUpper.x + pLower.x) / 2.0, y: (pUpper.y + pLower.y) / 2.0 }
+                const transformedPoint = worldSpaceToScreenSpace(middle);
+                if (transformedPoint.x < point.x) {
+                    pUpper.x = middle.x;
+                } else {
+                    pLower.x = middle.x;
+                }
+                if (transformedPoint.y < point.y) {
+                    pUpper.y = middle.y;
+                } else {
+                    pLower.y = middle.y;
+                }
+                error = Math.sqrt(((transformedPoint.x - point.x) ** 2) + ((transformedPoint.y - point.y) ** 2));
+                iteration++;
+            }
+            return middle;
         }
         function canvas_arrow(context, fromx, fromy, tox, toy) {
             var headlen = 15; // length of head in pixels
@@ -167,13 +229,55 @@
             context.moveTo(tox, toy);
             context.lineTo(tox - headlen * Math.cos(angle + Math.PI / 6), toy - headlen * Math.sin(angle + Math.PI / 6));
         }
+        function draw3d() {
+            const canvas3d = document.getElementById('canvas3d');
+            const ctx = canvas3d.getContext("2d");
+            ctx.fillStyle = "rgb(0, 0, 0)";
+            ctx.fillRect(0, 0, canvas3d.width, canvas3d.height);
+            ctx.save();
+            let pos = worldSpaceToScreenSpace(world.player.pos);
+            ctx.translate(0, canvas3d.height / 2.0);
+            let planeX = 0;
+            let planeY = 0.66;
+            for (let i = 0; i < world.rays.length; i++) {
+                let ray = world.rays[i]
+                let rayStart = worldSpaceToScreenSpace(ray.start);
+                let rayEnd = worldSpaceToScreenSpace(ray.end);
+                let lineHeight = canvas3d.height / (ray.length * Math.cos(ray.angle));
+                ctx.lineWidth = 1;
+                if (ray.cellHit > 0) {
+                    let brightness = (255 - 80 * ray.side);
+                    ctx.strokeStyle = `rgb(${brightness}, 0, 0)`;
+                } else {
+                    ctx.strokeStyle = `rgb(0, 0, 0)`;
+                }
+                ctx.beginPath();
+                ctx.moveTo(i, -lineHeight);
+                ctx.lineTo(i, lineHeight);
+                ctx.stroke();
+                ctx.strokeStyle = `rgb(50, 50, 50)`;
+                ctx.beginPath();
+                ctx.moveTo(i, lineHeight);
+                ctx.lineTo(i, canvas3d.height);
+                ctx.stroke();
+                ctx.strokeStyle = `rgb(120, 120, 120)`;
+                ctx.beginPath();
+                ctx.moveTo(i, -canvas3d.height);
+                ctx.lineTo(i, -lineHeight);
+                ctx.stroke();
+            }
+            ctx.restore();
+        }
         function draw(canvas, drawCoordColors = false) {
+            if (!drawCoordColors) {
+                draw3d();
+            }
             const ctx = canvas.getContext("2d");
 
             const centerX = canvas.width / 2;
             const centerY = canvas.height / 2;
 
-            ctx.fillStyle = "rgb(255, 255, 255)";
+            ctx.fillStyle = "rgb(100, 100, 100)";
             ctx.fillRect(0, 0, canvas.width, canvas.height);
             ctx.save();
             ctx.strokeRect(0, 0, canvas.width, canvas.height);
@@ -220,12 +324,6 @@
             const dir = worldSpaceToScreenSpace(world.player.dir);
             ctx.translate(pos.x, pos.y);
 
-            ctx.lineWidth = 4;
-            ctx.strokeStyle = 'rgb(255, 0, 255)';
-            ctx.beginPath();
-            canvas_arrow(ctx, 0, 0, dir.x, dir.y);
-            ctx.stroke();
-
             ctx.beginPath();
             ctx.arc(0, 0, 10, 0, 2 * Math.PI, false);
             ctx.fillStyle = 'green';
@@ -237,22 +335,68 @@
 
             for (let i = 0; i < world.rays.length; i++) {
                 let ray = world.rays[i];
-                const start = worldSpaceToScreenSpace(ray.start);
                 const end = worldSpaceToScreenSpace(ray.end);
-                ctx.lineWidth = 2;
-                ctx.strokeStyle = 'rgb(0, 0, 255)';
+                ctx.lineWidth = 1;
+                ctx.strokeStyle = 'rgb(255, 255, 255)';
                 ctx.beginPath();
-                canvas_arrow(ctx, 0, 0, end.x, end.y);
+                ctx.moveTo(0, 0);
+                ctx.lineTo(end.x, end.y);
                 ctx.stroke();
             }
+
+            ctx.lineWidth = 4;
+            ctx.strokeStyle = 'rgb(255, 0, 255)';
+            ctx.beginPath();
+            canvas_arrow(ctx, 0, 0, dir.x, dir.y);
+            ctx.stroke();
 
             ctx.restore();
         }
     </script>
+    <style>
+        .slidecontainer {
+          width: 100%;
+        }
+        
+        .slider {
+          width: 100%;
+          height: 25px;
+          background: #d3d3d3;
+          outline: none;
+          opacity: 0.7;
+          -webkit-transition: .2s;
+          transition: opacity .2s;
+        }
+        
+        .slider:hover {
+          opacity: 1;
+        }
+        
+        .slider::-webkit-slider-thumb {
+          -webkit-appearance: none;
+          appearance: none;
+          width: 25px;
+          height: 25px;
+          background: #04AA6D;
+          cursor: pointer;
+        }
+        
+        .slider::-moz-range-thumb {
+          width: 25px;
+          height: 25px;
+          background: #04AA6D;
+          cursor: pointer;
+        }
+        </style>
 </head>
 
 <body oncontextmenu="return false;">
-    <canvas id="canvas" width="1000" height="800"></canvas>
+    <canvas id="canvas" width="800" height="800"></canvas>
+    <canvas id="canvas3d" width="1000" height="640" style="border: 2px solid black;"></canvas>
+    <div class="slidecontainer">
+        <input type="range" min="10" max="180" value="90" class="slider" id="FOV">
+    </div>
 </body>
+
 
 </html>

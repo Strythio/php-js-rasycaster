@@ -38,16 +38,16 @@ class Client {
 		if (!$this->isConnected) {
 			return false;
 		}
-		$sockets = array($this->clientSocket);
-		$s = socket_select($sockets, $w, $e, 0);
-		if ($s === false || $s === 0) {
-			return false;
-		}
+		// $sockets = array($this->clientSocket);
+		// $s = socket_select($sockets, $w, $e, 0);
+		// if ($s === false || $s === 0) {
+		// 	return false;
+		// }
 		$buf = socket_read($this->clientSocket, 4096, PHP_BINARY_READ);
 		if ($buf !== false) {
 			$bytes = strlen($buf);
 			if ($bytes == 0) {
-				echo "No data\n";
+				$this->disconnect();
 				return false;
 			}
 			$unsealed = $this->unseal($buf);
@@ -107,8 +107,11 @@ class Client {
 			$header = pack('CC', $b1, $length);
 		elseif($length > 125 && $length < 65536)
 			$header = pack('CCn', $b1, 126, $length);
-		elseif($length >= 65536)
-			$header = pack('CCNN', $b1, 127, $length);
+		elseif($length >= 65536) {
+			$upper_32_bits = $length >> 32;
+			$lower_32_bits = $length & 0xffffffff;
+			$header = pack('CCNN', $b1, 127, $upper_32_bits, $lower_32_bits);
+		}
 		return $header.$socketData;
 	}
 
